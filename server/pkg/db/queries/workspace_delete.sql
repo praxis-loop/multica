@@ -457,6 +457,19 @@ deleted_channel_user_bindings AS (
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
 ),
+-- Lark project/issue-topic sync state. All three are workspace-scoped, so they
+-- key off workspace_id directly rather than the installation set: an outbox row
+-- outlives the binding it was queued from, and a topic binding can carry a NULL
+-- project_binding_id after its project route was unbound.
+deleted_channel_notification_outbox AS (
+    DELETE FROM channel_notification_outbox WHERE workspace_id = $1
+),
+deleted_channel_issue_topic_bindings AS (
+    DELETE FROM channel_issue_topic_binding WHERE workspace_id = $1
+),
+deleted_channel_project_bindings AS (
+    DELETE FROM channel_project_binding WHERE workspace_id = $1
+),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_lark_installations)

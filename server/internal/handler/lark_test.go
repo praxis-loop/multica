@@ -269,13 +269,24 @@ func wireLarkInstallServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistrationService: %v", err)
 	}
+	projectSync, err := lark.NewProjectSyncService(lark.ProjectSyncServiceConfig{
+		Pool:    testPool,
+		Queries: testHandler.Queries,
+		Issues:  testHandler.IssueService,
+		Tasks:   testHandler.TaskService,
+	})
+	if err != nil {
+		t.Fatalf("NewProjectSyncService: %v", err)
+	}
 
-	prevInstall, prevReg := testHandler.LarkInstallations, testHandler.LarkRegistration
+	prevInstall, prevReg, prevProjectSync := testHandler.LarkInstallations, testHandler.LarkRegistration, testHandler.LarkProjectSync
 	testHandler.LarkInstallations = installSvc
 	testHandler.LarkRegistration = regSvc
+	testHandler.LarkProjectSync = projectSync
 	t.Cleanup(func() {
 		testHandler.LarkInstallations = prevInstall
 		testHandler.LarkRegistration = prevReg
+		testHandler.LarkProjectSync = prevProjectSync
 	})
 }
 
@@ -413,6 +424,225 @@ RETURNING id
 	// Workspace owner/admin: allowed.
 	if code := revoke(testUserID, seedInstallation()); code != http.StatusNoContent {
 		t.Fatalf("revoke as workspace owner: want 204, got %d", code)
+	}
+}
+
+func TestRevokeLarkInstallation_RevokesRoutesAndPreservesSentHistory(t *testing.T) {
+	wireLarkInstallServices(t)
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "LarkRevokeRoutesAgent", []byte("[]"))
+
+	var projectID, projectIssueID, directIssueID, installationID string
+	var projectBindingID, projectTopicID, directTopicID string
+	var pendingID, sendingID, sentID string
+	nonEmptyStrings := func(values ...string) []string {
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			if value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	}
+	t.Cleanup(func() {
+		if pendingID != "" || sendingID != "" || sentID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_notification_outbox WHERE id = ANY($1::uuid[])`, nonEmptyStrings(pendingID, sendingID, sentID))
+		}
+		if projectTopicID != "" || directTopicID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_issue_topic_binding WHERE id = ANY($1::uuid[])`, nonEmptyStrings(projectTopicID, directTopicID))
+		}
+		if projectBindingID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_project_binding WHERE id = $1`, projectBindingID)
+		}
+		if installationID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
+		}
+		if projectIssueID != "" || directIssueID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = ANY($1::uuid[])`, nonEmptyStrings(projectIssueID, directIssueID))
+		}
+		if projectID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	})
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'Lark revoke routes project')
+		RETURNING id`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, project_id, number, title, creator_type, creator_id)
+		VALUES ($1, $2, (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+			'Project-owned Lark topic', 'member', $3)
+		RETURNING id`, testWorkspaceID, projectID, testUserID).Scan(&projectIssueID); err != nil {
+		t.Fatalf("seed project issue: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, number, title, creator_type, creator_id)
+		VALUES ($1, (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+			'Direct Lark topic', 'member', $2)
+		RETURNING id`, testWorkspaceID, testUserID).Scan(&directIssueID); err != nil {
+		t.Fatalf("seed direct issue: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_installation (
+			workspace_id, agent_id, channel_type, config, installer_user_id, status
+		) VALUES (
+			$1, $2, 'feishu',
+			jsonb_build_object('app_id', 'cli_revoke_routes', 'bot_open_id', 'ou_revoke_routes'),
+			$3, 'active'
+		)
+		RETURNING id`, testWorkspaceID, agentID, testUserID).Scan(&installationID); err != nil {
+		t.Fatalf("seed installation: %v", err)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_project_binding (
+			workspace_id, project_id, installation_id, channel_chat_id,
+			channel_chat_name, state, created_by_user_id, bound_by_user_id, bound_at
+		) VALUES ($1, $2, $3, 'oc_revoke_routes', 'Revoke routes', 'active', $4, $4, now())
+		RETURNING id`, testWorkspaceID, projectID, installationID, testUserID).Scan(&projectBindingID); err != nil {
+		t.Fatalf("seed project binding: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_issue_topic_binding (
+			workspace_id, installation_id, project_binding_id, project_id, issue_id,
+			channel_chat_id, topic_root_message_id, binding_source, state, created_by_user_id
+		) VALUES ($1, $2, $3, $4, $5, 'oc_revoke_routes', 'om_project_topic',
+			'issue_created_by_multica', 'active', $6)
+		RETURNING id`,
+		testWorkspaceID, installationID, projectBindingID, projectID, projectIssueID, testUserID,
+	).Scan(&projectTopicID); err != nil {
+		t.Fatalf("seed project topic: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_issue_topic_binding (
+			workspace_id, installation_id, issue_id, channel_chat_id,
+			topic_root_message_id, binding_source, state, created_by_user_id
+		) VALUES ($1, $2, $3, 'oc_direct_route', 'om_direct_topic',
+			'manual_topic_bind', 'active', $4)
+		RETURNING id`, testWorkspaceID, installationID, directIssueID, testUserID).Scan(&directTopicID); err != nil {
+		t.Fatalf("seed direct topic: %v", err)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_notification_outbox (
+			event_id, workspace_id, project_id, project_binding_id, issue_id,
+			event_type, payload, status
+		) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'issue_created',
+			'{"route":"project-pending"}'::jsonb, 'pending')
+		RETURNING id`, testWorkspaceID, projectID, projectBindingID, projectIssueID).Scan(&pendingID); err != nil {
+		t.Fatalf("seed pending project outbox: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_notification_outbox (
+			event_id, workspace_id, issue_topic_binding_id, issue_id,
+			event_type, payload, status, attempts, locked_at, locked_by
+		) VALUES (gen_random_uuid(), $1, $2, $3, 'comment_created',
+			'{"route":"direct-sending"}'::jsonb, 'sending', 1, now(), 'revoke-test-worker')
+		RETURNING id`, testWorkspaceID, directTopicID, directIssueID).Scan(&sendingID); err != nil {
+		t.Fatalf("seed sending direct outbox: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_notification_outbox (
+			event_id, workspace_id, project_id, project_binding_id,
+			issue_topic_binding_id, issue_id, event_type, payload,
+			status, attempts, sent_at
+		) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'issue_status_changed',
+			'{"history":"preserve"}'::jsonb, 'sent', 2, '2026-01-02T03:04:05Z')
+		RETURNING id`,
+		testWorkspaceID, projectID, projectBindingID, projectTopicID, projectIssueID,
+	).Scan(&sentID); err != nil {
+		t.Fatalf("seed sent outbox: %v", err)
+	}
+	var sentStatusBefore, sentAtBefore, sentPayloadBefore string
+	var sentAttemptsBefore int32
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, attempts, sent_at::text, payload::text
+		FROM channel_notification_outbox WHERE id = $1`, sentID).Scan(
+		&sentStatusBefore, &sentAttemptsBefore, &sentAtBefore, &sentPayloadBefore,
+	); err != nil {
+		t.Fatalf("snapshot sent outbox: %v", err)
+	}
+
+	req := newRequestAs(testUserID, http.MethodDelete,
+		"/api/workspaces/"+testWorkspaceID+"/lark/installations/"+installationID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "installationId", installationID)
+	w := httptest.NewRecorder()
+	testHandler.RevokeLarkInstallation(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("revoke installation: want 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assertState := func(table, id, want string) {
+		t.Helper()
+		var got string
+		if err := testPool.QueryRow(ctx, `SELECT state FROM `+table+` WHERE id = $1`, id).Scan(&got); err != nil {
+			t.Fatalf("load %s state: %v", table, err)
+		}
+		if got != want {
+			t.Fatalf("%s %s state = %q, want %q", table, id, got, want)
+		}
+	}
+	var installationStatus string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM channel_installation WHERE id = $1`, installationID).Scan(&installationStatus); err != nil {
+		t.Fatalf("load installation status: %v", err)
+	}
+	if installationStatus != "revoked" {
+		t.Fatalf("installation status = %q, want revoked", installationStatus)
+	}
+	assertState("channel_project_binding", projectBindingID, "bot_revoked")
+	assertState("channel_issue_topic_binding", projectTopicID, "bot_revoked")
+	assertState("channel_issue_topic_binding", directTopicID, "bot_revoked")
+
+	for _, outboxID := range []string{pendingID, sendingID} {
+		var status, lastError string
+		var lockedAtCleared, lockedByCleared bool
+		if err := testPool.QueryRow(ctx, `
+			SELECT status, COALESCE(last_error, ''), locked_at IS NULL, locked_by IS NULL
+			FROM channel_notification_outbox WHERE id = $1`, outboxID).Scan(
+			&status, &lastError, &lockedAtCleared, &lockedByCleared,
+		); err != nil {
+			t.Fatalf("load outbox %s: %v", outboxID, err)
+		}
+		if status != "dead" || lastError != "bot_revoked" || !lockedAtCleared || !lockedByCleared {
+			t.Fatalf("outbox %s = status %q error %q locks_cleared=%v/%v, want dead/bot_revoked/true/true",
+				outboxID, status, lastError, lockedAtCleared, lockedByCleared)
+		}
+	}
+	var sentStatusAfter, sentAtAfter, sentPayloadAfter string
+	var sentAttemptsAfter int32
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, attempts, sent_at::text, payload::text
+		FROM channel_notification_outbox WHERE id = $1`, sentID).Scan(
+		&sentStatusAfter, &sentAttemptsAfter, &sentAtAfter, &sentPayloadAfter,
+	); err != nil {
+		t.Fatalf("reload sent outbox: %v", err)
+	}
+	if sentStatusAfter != sentStatusBefore || sentAttemptsAfter != sentAttemptsBefore ||
+		sentAtAfter != sentAtBefore || sentPayloadAfter != sentPayloadBefore {
+		t.Fatalf("sent history changed: before=%q/%d/%q/%q after=%q/%d/%q/%q",
+			sentStatusBefore, sentAttemptsBefore, sentAtBefore, sentPayloadBefore,
+			sentStatusAfter, sentAttemptsAfter, sentAtAfter, sentPayloadAfter)
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE channel_installation SET status = 'active' WHERE id = $1`, installationID); err != nil {
+		t.Fatalf("reactivate installation row: %v", err)
+	}
+	assertState("channel_project_binding", projectBindingID, "bot_revoked")
+	assertState("channel_issue_topic_binding", projectTopicID, "bot_revoked")
+	assertState("channel_issue_topic_binding", directTopicID, "bot_revoked")
+	var resumableOutbox int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM channel_notification_outbox
+		WHERE id = ANY($1::uuid[]) AND status IN ('pending', 'sending')`,
+		[]string{pendingID, sendingID, sentID},
+	).Scan(&resumableOutbox); err != nil {
+		t.Fatalf("count resumable outbox after reactivation: %v", err)
+	}
+	if resumableOutbox != 0 {
+		t.Fatalf("reactivating installation restored %d pending/sending outbox rows", resumableOutbox)
 	}
 }
 

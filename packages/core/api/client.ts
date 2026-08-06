@@ -1,4 +1,5 @@
 import type {
+  ChannelIssueTopicBindingResponse,
   Issue,
   IssuePriority,
   CreateIssueRequest,
@@ -357,6 +358,8 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  ChannelIssueTopicBindingResponseSchema,
+  EMPTY_CHANNEL_ISSUE_TOPIC_BINDING_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
   EMPTY_CHAT_DRAFT_RESTORES,
   CreateFeedbackResponseSchema,
@@ -1018,6 +1021,34 @@ export class ApiClient {
       throw new Error("GET /api/issues/:id returned a malformed issue");
     }
     return issue;
+  }
+
+  async getIssueChannelTopicBinding(id: string): Promise<ChannelIssueTopicBindingResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/channel-topic-binding`);
+    return parseWithFallback(
+      raw,
+      ChannelIssueTopicBindingResponseSchema,
+      EMPTY_CHANNEL_ISSUE_TOPIC_BINDING_RESPONSE,
+      { endpoint: "GET /api/issues/:id/channel-topic-binding" },
+    );
+  }
+
+  async deleteIssueChannelTopicBinding(id: string): Promise<void> {
+    await this.fetch(`/api/issues/${id}/channel-topic-binding`, { method: "DELETE" });
+  }
+
+  async enableIssueChannelTopicBinding(id: string): Promise<ChannelIssueTopicBindingResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/channel-topic-binding/enable`, {
+      method: "POST",
+    });
+    const response = parseWithFallback<ChannelIssueTopicBindingResponse | null>(
+      raw,
+      ChannelIssueTopicBindingResponseSchema,
+      null,
+      { endpoint: "POST /api/issues/:id/channel-topic-binding/enable" },
+    );
+    if (!response) throw new Error("invalid issue topic binding response");
+    return response;
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {

@@ -611,6 +611,9 @@ func main() {
 	if h.TelegramOutbound != nil {
 		h.TelegramOutbound.Start(sweepCtx)
 	}
+	if h.LarkProjectSyncWorker != nil {
+		go h.LarkProjectSyncWorker.Run(sweepCtx)
+	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
 	h.PRRefresh.Start(sweepCtx)

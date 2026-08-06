@@ -170,7 +170,8 @@ type feishuSessionBinder struct{ session chatSession }
 // binding's config when the binding key is a composite (Lark topic): the real
 // chat id lives here so the outbound path can post back.
 type larkBindingConfig struct {
-	ChatID string `json:"chat_id"`
+	ChatID             string `json:"chat_id"`
+	TopicRootMessageID string `json:"topic_root_message_id,omitempty"`
 }
 
 // larkSessionRouting derives the session-isolation key (stored as
@@ -186,7 +187,15 @@ func larkSessionRouting(msg channel.InboundMessage) (bindingKey string, config [
 	if msg.Source.ChatType != channel.ChatTypeGroup || msg.Source.ThreadID == "" {
 		return chatID, nil
 	}
-	cfg, _ := json.Marshal(larkBindingConfig{ChatID: chatID})
+	rootID := msg.MessageID
+	if msg.ReplyTo != nil {
+		if msg.ReplyTo.RootID != "" {
+			rootID = msg.ReplyTo.RootID
+		} else if msg.ReplyTo.MessageID != "" {
+			rootID = msg.ReplyTo.MessageID
+		}
+	}
+	cfg, _ := json.Marshal(larkBindingConfig{ChatID: chatID, TopicRootMessageID: rootID})
 	return chatID + ":" + msg.Source.ThreadID, cfg
 }
 
@@ -284,6 +293,7 @@ func dispatchResultFromEngine(res engine.Result) DispatchResult {
 		IssueNumber:        res.IssueNumber,
 		IssueIdentifier:    res.IssueIdentifier,
 		IssueTitle:         res.IssueTitle,
+		ReplyText:          res.ReplyText,
 		IssueDuplicate:     res.IssueDuplicate,
 		IssueUsageHadMedia: res.IssueUsageHadMedia,
 	}

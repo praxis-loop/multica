@@ -35,9 +35,10 @@ type Router struct {
 	mu   sync.RWMutex
 	sets map[channel.Type]ResolverSet
 
-	issues IssueCreator
-	tasks  TaskEnqueuer
-	reader SessionReader
+	issues   IssueCreator
+	tasks    TaskEnqueuer
+	reader   SessionReader
+	commands ProjectCommandHandler
 
 	batcher *pendingBatcher
 
@@ -141,6 +142,13 @@ func (r *Router) Register(t channel.Type, set ResolverSet) {
 // DefaultChatRunBatchWindow. Without it, runs fire inline (used by tests).
 func (r *Router) EnableRunBatching(window time.Duration) {
 	r.batcher = newPendingBatcher(window)
+}
+
+// SetProjectCommandHandler installs the deterministic project/topic sync
+// command handler. It is optional; without it, the ordinary channel chat
+// pipeline is unchanged.
+func (r *Router) SetProjectCommandHandler(handler ProjectCommandHandler) {
+	r.commands = handler
 }
 
 // Drain cancels detached media processing, flushes debounced run triggers, and
@@ -328,6 +336,33 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		default:
 			return Result{}, finalizeRelease, fmt.Errorf("resolve sender: %w", err)
 		}
+	}
+
+	// /project commands are answered from the installation and sender identity
+	// alone, so they return before any chat_session work — they run after the
+	// @bot gate and sender membership validation above, and never reach the
+	// chat pipeline.
+	// Handle already normalized CommandText from Text, so classify that.
+	if cmd, ok := ParseProjectCommand(msg.CommandText); ok && r.commands != nil {
+		commandResult, err := r.commands.HandleProjectCommand(ctx, ProjectCommandContext{
+			Installation: inst,
+			UserID:       identity.UserID,
+			Message:      msg,
+			Command:      cmd,
+		})
+		if err != nil {
+			return Result{}, finalizeRelease, fmt.Errorf("handle project command: %w", err)
+		}
+		return Result{
+			Outcome:         OutcomeCommandHandled,
+			InstallationID:  inst.ID,
+			Sender:          msg.Source.SenderID,
+			IssueID:         commandResult.IssueID,
+			IssueNumber:     commandResult.IssueNumber,
+			IssueIdentifier: commandResult.IssueIdentifier,
+			IssueTitle:      commandResult.IssueTitle,
+			ReplyText:       commandResult.ReplyText,
+		}, finalizeMark, nil
 	}
 
 	// 5. Resolve the chat_session. Group sessions are created by the INSTALLER

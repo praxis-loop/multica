@@ -117,6 +117,8 @@ export const issueKeys = {
     ] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
+  channelTopic: (wsId: string, id: string) =>
+    [...issueKeys.all(wsId), "channel-topic", id] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
@@ -413,6 +415,14 @@ export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
     queryFn: () => api.getIssue(id),
+  });
+}
+
+export function issueChannelTopicOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: issueKeys.channelTopic(wsId, id),
+    queryFn: () => api.getIssueChannelTopicBinding(id),
+    enabled: !!wsId && !!id,
   });
 }
 

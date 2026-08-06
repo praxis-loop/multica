@@ -73,6 +73,7 @@ import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers
 import { Switch } from "@multica/ui/components/ui/switch";
 import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { IssueChannelTopicSection } from "./issue-channel-topic-section";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -2485,6 +2486,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           time rather than by a silently shorter list. */}
       <QuickActionsSection issueId={issue.id} />
       <PluginPanelSection issueId={issue.id} />
+
+      <IssueChannelTopicSection issueId={issue.id} canManage={canModerateComments} />
 
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;

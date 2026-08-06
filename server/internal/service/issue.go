@@ -86,6 +86,11 @@ type IssueCreateParams struct {
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
 // callers leave it zero-valued.
 type IssueCreateOpts struct {
+	// WithinTransaction runs after the issue and in-transaction companion rows
+	// are inserted but before commit. Channel integrations use it to persist a
+	// source topic binding atomically with the issue create.
+	WithinTransaction func(ctx context.Context, tx pgx.Tx, issue db.Issue) error
+
 	// BroadcastPayload, if non-nil, is invoked after the issue row is
 	// created and attachments are linked. Its return value is sent as
 	// the EventIssueCreated payload via the event bus. The HTTP handler
@@ -367,6 +372,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		assignedTask, err = s.TaskService.createDeferredChannelIssueTaskWithQueries(ctx, qtx, issue, opts.AssignedAgentRunFireAt)
 		if err != nil {
 			return IssueCreateResult{}, fmt.Errorf("create deferred channel issue task: %w", err)
+		}
+	}
+
+	if opts.WithinTransaction != nil {
+		if err := opts.WithinTransaction(ctx, tx, issue); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("issue create transaction hook: %w", err)
 		}
 	}
 
