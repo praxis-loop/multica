@@ -12,6 +12,7 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CancelTaskResponse,
+  ChannelIssueTopicBindingResponse,
   ChatMessage,
   ChatDraftRestoresResponse,
   ChatPendingTask,
@@ -2163,6 +2164,33 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+// Issue ↔ Feishu topic synchronization responses are consumed by both the issue
+// detail panel and mutation flows. Read endpoints degrade to explicit empty
+// records; mutation callers use these schemas with a null fallback and reject
+// malformed success bodies so the UI never reports a binding that did not parse.
+export const ChannelIssueTopicBindingSchema = z.object({
+  id: z.string(),
+  installation_id: z.string(),
+  project_binding_id: z.string().nullable(),
+  project_id: z.string().nullable(),
+  issue_id: z.string(),
+  chat_id: z.string(),
+  topic_root_message_id: z.string(),
+  thread_id: z.string().nullable(),
+  binding_source: z.string(),
+  state: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ChannelIssueTopicBindingResponseSchema = z.object({
+  channel_topic_binding: ChannelIssueTopicBindingSchema.nullable(),
+}).loose();
+
+export const EMPTY_CHANNEL_ISSUE_TOPIC_BINDING_RESPONSE: ChannelIssueTopicBindingResponse = {
+  channel_topic_binding: null,
 };
 
 // ---------------------------------------------------------------------------

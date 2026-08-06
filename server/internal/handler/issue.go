@@ -2605,6 +2605,25 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var withinTransaction func(context.Context, pgx.Tx, db.Issue) error
+	if creatorType == "agent" && originType.Valid && originType.String == "agent_create" &&
+		originID.Valid && h.LarkProjectSync != nil {
+		var err error
+		withinTransaction, err = h.LarkProjectSync.IssueCreateTopicHookForAgentTask(
+			r.Context(), wsUUID, originID,
+		)
+		if err != nil {
+			slog.Warn("resolve issue create topic hook failed", append(
+				logger.RequestAttrs(r),
+				"error", err,
+				"workspace_id", workspaceID,
+				"task_id", uuidToString(originID),
+			)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve issue source topic")
+			return
+		}
+	}
+
 	// Prefix is workspace-level; pre-compute once so both the broadcast
 	// payload builder and the HTTP response share the same value.
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
@@ -2653,9 +2672,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
 	}, service.IssueCreateOpts{
-		ActorID:          actualCreatorID,
-		AnalyticsAgentID: analyticsAgentID,
-		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
+		ActorID:           actualCreatorID,
+		AnalyticsAgentID:  analyticsAgentID,
+		Platform:          func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
+		WithinTransaction: withinTransaction,
 		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
 			payload := issueToResponse(issue, prefix)
 			payload.Attachments = buildAttachmentResponses(atts)

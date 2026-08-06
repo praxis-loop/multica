@@ -2196,3 +2196,77 @@ describe("ApiClient workspace MCP servers", () => {
     expect(init.method).toBe("DELETE");
   });
 });
+
+describe("ApiClient issue channel-topic binding", () => {
+  const binding = {
+    id: "binding-1",
+    installation_id: "installation-1",
+    project_binding_id: null,
+    project_id: null,
+    issue_id: "issue-1",
+    chat_id: "oc_chat",
+    topic_root_message_id: "om_root",
+    thread_id: null,
+    binding_source: "direct_topic",
+    state: "active",
+    created_at: "2026-07-30T00:00:00Z",
+    updated_at: "2026-07-30T00:00:00Z",
+  };
+
+  it("parses the binding on read and on enable", async () => {
+    const topicResponse = { channel_topic_binding: binding };
+    // A Response body can only be read once, so each call needs a fresh one.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(topicResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
+
+    const api = new ApiClient("https://api.example.test");
+    await expect(api.getIssueChannelTopicBinding("issue-1")).resolves.toEqual(topicResponse);
+    await expect(api.enableIssueChannelTopicBinding("issue-1")).resolves.toEqual(topicResponse);
+  });
+
+  // The read endpoint degrades so the issue panel still renders, but a malformed
+  // enable response must reject: reporting a resumed sync that did not parse
+  // would leave the user believing topic delivery is back on when it is not.
+  it("degrades a malformed read but rejects a malformed enable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ unexpected: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
+
+    const api = new ApiClient("https://api.example.test");
+    await expect(api.getIssueChannelTopicBinding("issue-1")).resolves.toEqual({
+      channel_topic_binding: null,
+    });
+    await expect(api.enableIssueChannelTopicBinding("issue-1")).rejects.toThrow(
+      "invalid issue topic binding response",
+    );
+  });
+
+  it("sends DELETE to the binding endpoint on unbind", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = new ApiClient("https://api.example.test");
+    await api.deleteIssueChannelTopicBinding("issue-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/issues/issue-1/channel-topic-binding");
+    expect(init.method).toBe("DELETE");
+  });
+});

@@ -166,9 +166,20 @@ func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request)
 	} else if !h.canManageAgent(w, r, agent) {
 		return
 	}
-	if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
-		return
+	if h.LarkProjectSync != nil {
+		if err := h.LarkProjectSync.RevokeInstallation(r.Context(), wsUUID, instUUID); err != nil {
+			if errors.Is(err, lark.ErrInstallationNotFound) {
+				writeError(w, http.StatusNotFound, "lark installation not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to revoke lark installation bindings")
+			return
+		}
+	} else {
+		if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke installation")
+			return
+		}
 	}
 	h.publish(protocol.EventLarkInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
 		"id": uuidToString(instUUID),

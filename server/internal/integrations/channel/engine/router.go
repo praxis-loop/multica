@@ -35,9 +35,10 @@ type Router struct {
 	mu   sync.RWMutex
 	sets map[channel.Type]ResolverSet
 
-	issues IssueCreator
-	tasks  TaskEnqueuer
-	reader SessionReader
+	issues   IssueCreator
+	tasks    TaskEnqueuer
+	reader   SessionReader
+	commands ProjectCommandHandler
 
 	batcher *pendingBatcher
 
@@ -142,6 +143,13 @@ func (r *Router) Register(t channel.Type, set ResolverSet) {
 // DefaultChatRunBatchWindow. Without it, runs fire inline (used by tests).
 func (r *Router) EnableRunBatching(window time.Duration) {
 	r.batcher = newPendingBatcher(window)
+}
+
+// SetProjectCommandHandler installs the deterministic project/topic sync
+// command handler. It is optional; without it, the ordinary channel chat
+// pipeline is unchanged.
+func (r *Router) SetProjectCommandHandler(handler ProjectCommandHandler) {
+	r.commands = handler
 }
 
 // Drain cancels detached media processing, flushes debounced run triggers, and
@@ -347,6 +355,34 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			}
 			return Result{}, finalizeRelease, fmt.Errorf("resolve validated inbound route: %w", err)
 		}
+	}
+
+	// /project commands are answered from the installation and sender identity
+	// alone, so they return before any chat_session work. They still run AFTER
+	// validated-inbound discovery: the resolver is what finalizes the platform
+	// target for a newly exposed conversation, and skipping it here would let a
+	// command be the one inbound path that leaves that route unresolved.
+	// Handle already normalized CommandText from Text, so classify that.
+	if cmd, ok := ParseProjectCommand(msg.CommandText); ok && r.commands != nil {
+		commandResult, err := r.commands.HandleProjectCommand(ctx, ProjectCommandContext{
+			Installation: inst,
+			UserID:       identity.UserID,
+			Message:      msg,
+			Command:      cmd,
+		})
+		if err != nil {
+			return Result{}, finalizeRelease, fmt.Errorf("handle project command: %w", err)
+		}
+		return Result{
+			Outcome:         OutcomeCommandHandled,
+			InstallationID:  inst.ID,
+			Sender:          msg.Source.SenderID,
+			IssueID:         commandResult.IssueID,
+			IssueNumber:     commandResult.IssueNumber,
+			IssueIdentifier: commandResult.IssueIdentifier,
+			IssueTitle:      commandResult.IssueTitle,
+			ReplyText:       commandResult.ReplyText,
+		}, finalizeMark, nil
 	}
 
 	// 5-6. Resolve the chat_session, then append the message and dedup Mark as
