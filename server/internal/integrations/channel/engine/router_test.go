@@ -76,17 +76,21 @@ type fakeBinder struct {
 	appendErr    error
 	appendDelay  time.Duration
 	bindErr      error
+	ensureCalls  int
+	appendCalls  int
 	lastEnsure   EnsureSessionParams
 	lastAppend   AppendParams
 	lastBind     BindMediaParams
 }
 
 func (f *fakeBinder) EnsureSession(_ context.Context, p EnsureSessionParams) (pgtype.UUID, error) {
+	f.ensureCalls++
 	f.lastEnsure = p
 	return f.ensureID, f.ensureErr
 }
 func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendResult, error) {
 	f.mu.Lock()
+	f.appendCalls++
 	delay := f.appendDelay
 	f.lastAppend = p
 	res, err := f.appendResult, f.appendErr
@@ -118,6 +122,11 @@ func (f *fakeBinder) appendedParams() AppendParams {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastAppend
+}
+func (f *fakeBinder) calls() (int, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ensureCalls, f.appendCalls
 }
 
 type fakeAuditor struct {
@@ -174,6 +183,19 @@ func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID) {
 }
 func (f *fakeTyping) calls() int        { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
 func (f *fakeTyping) settledCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.settled }
+
+type fakeProjectCommands struct {
+	called bool
+	ctx    ProjectCommandContext
+	res    ProjectCommandResult
+	err    error
+}
+
+func (f *fakeProjectCommands) HandleProjectCommand(_ context.Context, p ProjectCommandContext) (ProjectCommandResult, error) {
+	f.called = true
+	f.ctx = p
+	return f.res, f.err
+}
 
 type fakeMedia struct {
 	mu            sync.Mutex
@@ -494,6 +516,53 @@ func TestRouter_UnboundSender_NeedsBinding(t *testing.T) {
 		return false
 	}) {
 		t.Fatalf("expected a NeedsBinding reply targeting the sender")
+	}
+}
+
+func TestRouter_ProjectCommandHandledBeforeSessionAppend(t *testing.T) {
+	h := newHarness(t)
+	commands := &fakeProjectCommands{
+		res: ProjectCommandResult{
+			ReplyText:       "bound",
+			IssueID:         uuidFromString(t, "77777777-7777-4777-8777-777777777777"),
+			IssueNumber:     42,
+			IssueIdentifier: "MUL-42",
+			IssueTitle:      "Fix sync",
+		},
+	}
+	h.router.SetProjectCommandHandler(commands)
+
+	msg := p2pMessage(t)
+	msg.Text = "/project status"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !commands.called {
+		t.Fatal("project command handler was not called")
+	}
+	if commands.ctx.UserID != h.ident.id.UserID {
+		t.Fatalf("user id = %v want %v", commands.ctx.UserID, h.ident.id.UserID)
+	}
+	if commands.ctx.Command.Resource != "project" || commands.ctx.Command.Action != "status" {
+		t.Fatalf("command = %+v", commands.ctx.Command)
+	}
+	ensureCalls, appendCalls := h.binder.calls()
+	if ensureCalls != 0 || appendCalls != 0 {
+		t.Fatalf("project command should not create or append a chat session, got %d/%d", ensureCalls, appendCalls)
+	}
+	if h.dedup.marks() != 1 || h.dedup.releases() != 0 {
+		t.Fatalf("dedup mark/release = %d/%d, want 1/0", h.dedup.marks(), h.dedup.releases())
+	}
+	if !waitFor(time.Second, func() bool {
+		for _, r := range h.replier.calls() {
+			if r.Outcome == OutcomeCommandHandled && r.ReplyText == "bound" && r.IssueIdentifier == "MUL-42" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("command result was not sent to replier: %+v", h.replier.calls())
 	}
 }
 
