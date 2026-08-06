@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -63,6 +64,80 @@ func TestPublishAttachmentsChangedCarriesIssueScope(t *testing.T) {
 	payload, ok := got.Payload.(map[string]any)
 	if !ok || payload["issue_id"] != util.UUIDToString(issueID) {
 		t.Fatalf("event payload = %#v", got.Payload)
+	}
+}
+
+func TestCreateWithinTransactionHookCommitsAndRollsBackWithIssue(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, _, _ := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	userUUID := util.MustParseUUID(userID)
+	issueService := NewIssueService(q, pool, events.New(), nil, &TaskService{Queries: q, TxStarter: pool, Bus: events.New()})
+
+	result, err := issueService.Create(ctx, IssueCreateParams{
+		WorkspaceID: workspaceUUID,
+		Title:       "Hook commits",
+		Status:      "todo",
+		Priority:    "none",
+		CreatorType: "member",
+		CreatorID:   userUUID,
+	}, IssueCreateOpts{
+		WithinTransaction: func(ctx context.Context, tx pgx.Tx, issue db.Issue) error {
+			_, err := tx.Exec(ctx, `
+				INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+				VALUES ($1, $2, 'member', $3, 'topic binding probe')`,
+				issue.ID, issue.WorkspaceID, userUUID)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create with successful hook: %v", err)
+	}
+	var committedCommentCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM comment
+		WHERE issue_id = $1 AND content = 'topic binding probe'`, result.Issue.ID).Scan(&committedCommentCount); err != nil {
+		t.Fatalf("count committed hook comment: %v", err)
+	}
+	if committedCommentCount != 1 {
+		t.Fatalf("committed hook comments = %d, want 1", committedCommentCount)
+	}
+
+	rollbackErr := errors.New("stop commit")
+	_, err = issueService.Create(ctx, IssueCreateParams{
+		WorkspaceID: workspaceUUID,
+		Title:       "Hook rolls back",
+		Status:      "todo",
+		Priority:    "none",
+		CreatorType: "member",
+		CreatorID:   userUUID,
+	}, IssueCreateOpts{
+		WithinTransaction: func(ctx context.Context, tx pgx.Tx, issue db.Issue) error {
+			_, execErr := tx.Exec(ctx, `
+				INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+				VALUES ($1, $2, 'member', $3, 'rolled back topic binding probe')`,
+				issue.ID, issue.WorkspaceID, userUUID)
+			if execErr != nil {
+				return execErr
+			}
+			return rollbackErr
+		},
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("Create rollback error = %v, want %v", err, rollbackErr)
+	}
+	var rolledBackIssueCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM issue
+		WHERE workspace_id = $1 AND title = 'Hook rolls back'`, workspaceUUID).Scan(&rolledBackIssueCount); err != nil {
+		t.Fatalf("count rolled back issue: %v", err)
+	}
+	if rolledBackIssueCount != 0 {
+		t.Fatalf("rolled back issues = %d, want 0", rolledBackIssueCount)
 	}
 }
 

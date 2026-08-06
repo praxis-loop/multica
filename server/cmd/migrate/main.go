@@ -59,11 +59,28 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // way, so it carries the same hazard — an INVALID v2 leftover recorded as
 // success would let migration 262 drop the still-valid v1, leaving all four
 // dashboard rollups on a full table scan.
+//
+// Migrations 264-271 build the lark project/topic sync UNIQUE indexes
+// concurrently (split out of 263). An interrupted CREATE UNIQUE INDEX
+// CONCURRENTLY leaves an INVALID index that not only would be mistaken for
+// success by IF NOT EXISTS but — critically for a UNIQUE index — does NOT
+// enforce uniqueness while invalid. Each hook drops only that invalid leftover
+// so the retry rebuilds a valid, enforcing index. The hook is a no-op when the
+// index is absent (fresh install) or already valid (this deployment's prod DB,
+// where the fork already built these indexes).
 var preMigrationHooks = map[string]preMigrationHook{
 	"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
 	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
 	"257_agent_task_queue_channel_media_pending_unique_v2":  cleanupInvalidConcurrentIndexHook("idx_one_pending_task_per_issue_agent_v2"),
 	"261_agent_task_queue_terminal_completed_at_v2":         cleanupInvalidConcurrentIndexHook("idx_agent_task_queue_terminal_completed_at_v2"),
+	"264_channel_project_binding_bind_token_index":          cleanupInvalidConcurrentIndexHook("uq_channel_project_binding_bind_token"),
+	"265_channel_project_binding_project_index":             cleanupInvalidConcurrentIndexHook("uq_channel_project_binding_project"),
+	"266_channel_project_binding_workspace_project_index":   cleanupInvalidConcurrentIndexHook("uq_channel_project_binding_workspace_project"),
+	"267_channel_project_binding_bot_group_index":           cleanupInvalidConcurrentIndexHook("uq_channel_project_binding_bot_group"),
+	"268_channel_issue_topic_issue_index":                   cleanupInvalidConcurrentIndexHook("uq_channel_issue_topic_issue"),
+	"269_channel_issue_topic_workspace_issue_index":         cleanupInvalidConcurrentIndexHook("uq_channel_issue_topic_workspace_issue"),
+	"270_channel_issue_topic_route_index":                   cleanupInvalidConcurrentIndexHook("uq_channel_issue_topic_route"),
+	"271_channel_notification_outbox_event_index":           cleanupInvalidConcurrentIndexHook("uq_channel_notification_outbox_event"),
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an

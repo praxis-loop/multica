@@ -282,6 +282,9 @@ type SendTextParams struct {
 	// ReplyTarget threads the text reply back into a Lark topic; see
 	// ReplyTarget. Empty keeps the chat-level send.
 	ReplyTarget ReplyTarget
+	// IdempotencyKey is forwarded to Lark's uuid field. Durable workers set it
+	// to the outbox row id so a crash retry cannot create duplicate messages.
+	IdempotencyKey string
 }
 
 // SendMarkdownCardParams is the input shape for posting an agent

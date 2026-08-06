@@ -204,6 +204,10 @@ type Handler struct {
 	// zero key. Wired in cmd/server/router.go after handler.New.
 	LarkInstallations *lark.InstallationService
 	LarkBindingTokens *lark.BindingTokenService
+	// LarkProjectSync owns deterministic /project and /issue topic commands
+	// plus the durable Feishu topic notification worker.
+	LarkProjectSync       *lark.ProjectSyncService
+	LarkProjectSyncWorker *lark.ProjectIssueSyncWorker
 	// LarkRegistration owns the device-flow install lifecycle: begin
 	// a registration session against accounts.feishu.cn, poll, and
 	// on success write lark_installation + the installer's

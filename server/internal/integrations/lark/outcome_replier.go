@@ -180,6 +180,16 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				"err", err.Error(),
 			)
 		}
+	case OutcomeCommandHandled:
+		if strings.TrimSpace(res.ReplyText) != "" {
+			if err := r.sendCommandReply(ctx, inst, msg, res.ReplyText); err != nil {
+				r.log.Warn("lark outcome replier: command reply failed",
+					"installation_id", uuidString(inst.ID),
+					"chat_id", string(msg.ChatID),
+					"err", err.Error(),
+				)
+			}
+		}
 	case OutcomeIngested:
 		// The agent's chat reply itself goes through the Patcher. An /issue
 		// command gets an immediate product result: either the newly created
@@ -198,6 +208,25 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 	case OutcomeDropped:
 		// OutcomeDropped is informational; no user-visible reply.
 	}
+}
+
+func (r *LarkOutcomeReplier) sendCommandReply(ctx context.Context, inst Installation, msg InboundMessage, text string) error {
+	if msg.ChatID == "" {
+		return errors.New("missing chat_id")
+	}
+	creds, err := r.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+	return sendWithThreadFallback(r.log, "send command reply text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+		_, err := r.client.SendTextMessage(ctx, SendTextParams{
+			InstallationID: creds,
+			ChatID:         msg.ChatID,
+			Text:           text,
+			ReplyTarget:    t,
+		})
+		return err
+	})
 }
 
 func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Installation, res DispatchResult) error {

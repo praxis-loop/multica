@@ -71,7 +71,8 @@ const (
 	// OutcomeNeedsBinding — the open_id is unbound; send the binding card.
 	OutcomeNeedsBinding Outcome = "needs_binding"
 	// OutcomeIngested — the message landed and a run was (or will be) enqueued.
-	OutcomeIngested Outcome = "ingested"
+	OutcomeIngested       Outcome = "ingested"
+	OutcomeCommandHandled Outcome = "command_handled"
 	// OutcomeAgentOffline — landed, but the agent has no runtime bound.
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
@@ -95,6 +96,7 @@ type DispatchResult struct {
 	IssueIdentifier string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
+	ReplyText  string
 	// IssueDuplicate distinguishes an active-issue conflict from a successful
 	// create while carrying the existing issue fields above.
 	IssueDuplicate bool
