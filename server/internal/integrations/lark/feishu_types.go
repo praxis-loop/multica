@@ -81,6 +81,8 @@ const (
 	OutcomeChatStarted  Outcome = "chat_started"
 	// OutcomeIssueUsage — /issue was sent without its required title.
 	OutcomeIssueUsage Outcome = "issue_usage"
+	// OutcomeCommandHandled — a /project command ran and carries its own reply.
+	OutcomeCommandHandled Outcome = "command_handled"
 	// OutcomeAgentOffline — landed, but the agent has no runtime bound.
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
@@ -106,6 +108,7 @@ type DispatchResult struct {
 	IssueWorkspaceSlug string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
+	ReplyText  string
 	// IssueDuplicate distinguishes an active-issue conflict from a successful
 	// create while carrying the existing issue fields above.
 	IssueDuplicate bool

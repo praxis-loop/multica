@@ -23,14 +23,15 @@ import (
 type Outcome string
 
 const (
-	OutcomeDropped       Outcome = "dropped"
-	OutcomeNeedsBinding  Outcome = "needs_binding"
-	OutcomeIngested      Outcome = "ingested"
-	OutcomeFreshPending  Outcome = "fresh_pending"
-	OutcomeChatStarted   Outcome = "chat_started"
-	OutcomeIssueUsage    Outcome = "issue_usage"
-	OutcomeAgentOffline  Outcome = "agent_offline"
-	OutcomeAgentArchived Outcome = "agent_archived"
+	OutcomeDropped        Outcome = "dropped"
+	OutcomeNeedsBinding   Outcome = "needs_binding"
+	OutcomeIngested       Outcome = "ingested"
+	OutcomeFreshPending   Outcome = "fresh_pending"
+	OutcomeChatStarted    Outcome = "chat_started"
+	OutcomeIssueUsage     Outcome = "issue_usage"
+	OutcomeCommandHandled Outcome = "command_handled"
+	OutcomeAgentOffline   Outcome = "agent_offline"
+	OutcomeAgentArchived  Outcome = "agent_archived"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -64,6 +65,7 @@ type Result struct {
 	IssueIdentifier    string
 	IssueWorkspaceSlug string
 	IssueTitle         string
+	ReplyText          string
 	// IssueDuplicate marks an /issue command that did not create a new issue
 	// because the shared duplicate guard found the active IssueID above.
 	// Repliers render this as a business conflict, never as an internal error.

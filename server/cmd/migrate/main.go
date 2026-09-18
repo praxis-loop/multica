@@ -139,6 +139,15 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // migrations costs one to_regclass lookup each, and only on a database where
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
+//
+// Migrations 399–409 build the lark project/topic sync indexes concurrently
+// (split out of 398, which does the transactional DDL). Eight of them are
+// UNIQUE, which sharpens the hazard: an INVALID unique index does NOT enforce
+// uniqueness, so a leftover mistaken for success would leave the binding tables
+// accepting duplicates. Each hook drops only that invalid leftover; it is a
+// no-op when the index is absent (fresh install) or already valid (this
+// deployment's production DB, where the fork built these indexes under their
+// pre-renumber names).
 var concurrentIndexCleanups = map[string]string{
 	"495_issue_to_label_label_id_index":                         "issue_to_label_label_idx",
 	"496_chat_session_agent_id_index":                           "idx_chat_session_agent_id",
@@ -316,6 +325,17 @@ var concurrentIndexCleanups = map[string]string{
 	"480_instance_telemetry_state_singleton_index":              "instance_telemetry_state_singleton_uidx",
 	"482_agent_task_queue_telemetry_started_index":              "idx_agent_task_queue_telemetry_started",
 	"484_issue_triage_state_index":                              "idx_issue_triage_state",
+	"501_channel_project_binding_bind_token_index":              "uq_channel_project_binding_bind_token",
+	"502_channel_project_binding_project_index":                 "uq_channel_project_binding_project",
+	"503_channel_project_binding_workspace_project_index":       "uq_channel_project_binding_workspace_project",
+	"504_channel_project_binding_bot_group_index":               "uq_channel_project_binding_bot_group",
+	"505_channel_issue_topic_issue_index":                       "uq_channel_issue_topic_issue",
+	"506_channel_issue_topic_workspace_issue_index":             "uq_channel_issue_topic_workspace_issue",
+	"507_channel_issue_topic_route_index":                       "uq_channel_issue_topic_route",
+	"508_channel_notification_outbox_event_index":               "uq_channel_notification_outbox_event",
+	"509_channel_notification_outbox_pending_index":             "idx_channel_notification_outbox_pending",
+	"510_channel_notification_outbox_issue_order_index":         "idx_channel_notification_outbox_issue_order",
+	"511_channel_notification_outbox_issue_event_order_index":   "idx_channel_notification_outbox_issue_event_order",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

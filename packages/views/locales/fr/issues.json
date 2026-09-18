@@ -839,6 +839,22 @@
     "update_failed": "Échec de la mise à jour de l'étiquette",
     "delete_failed": "Échec de la suppression de l'étiquette"
   },
+  "feishu_topic": {
+    "section_title": "Sujet Feishu",
+    "state_active": "Synchronisé",
+    "state_paused": "Interrompu manuellement",
+    "state_historical": "Sujet historique",
+    "state_none": "Aucune liaison de sujet",
+    "chat_label": "Groupe : {{id}}",
+    "root_label": "Racine du sujet : {{id}}",
+    "empty_hint": "Un sujet est créé une fois le projet lié et cette tâche synchronisée.",
+    "unbind": "Arrêter la synchronisation du sujet",
+    "enable": "Reprendre la synchronisation du sujet",
+    "toast_unbound": "Synchronisation du sujet de la tâche arrêtée",
+    "toast_unbind_failed": "Échec de l’arrêt de la synchronisation du sujet de la tâche",
+    "toast_enabled": "Synchronisation du sujet de la tâche reprise",
+    "toast_enable_failed": "Échec de la reprise de la synchronisation du sujet de la tâche"
+  },
   "backlog_hint": {
     "title": "L'agent est en pause dans À planifier",
     "description": "Cette tâche est mise de côté : l'agent assigné attendra donc. Déplacez-la vers « À faire » quand vous voulez que l'agent démarre.",

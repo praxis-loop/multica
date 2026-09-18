@@ -1,0 +1,3 @@
+-- Intentionally no-op.
+-- These tables can contain live Feishu/Lark project and issue topic bindings.
+-- Rolling this migration back must not drop or rewrite production binding data.
