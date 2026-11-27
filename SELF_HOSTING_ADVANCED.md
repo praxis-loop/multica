@@ -668,3 +668,9 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 Pin `MULTICA_IMAGE_TAG` in `.env` to an exact release like `v0.2.4` if you want to stay on a specific version. Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
 If the selected GHCR tag has not been published yet, fall back to `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
+
+## Praxis fork operations
+
+- Before syncing, compare the development checkout, the deployed revision, and the live `praxis-loop/multica` fork. Check fetch and push URLs explicitly, compare commits and migration numbers, and ensure a partial clone has all objects needed for a transfer before updating a deployment.
+- For a failed task, use the control-plane log to identify the run. Check its recorded failure reason, runtime ID and session ID, and the associated task error events. Follow the runtime ID to the runner that accepted the task and inspect its agent and provider logs. Normalize time zones when comparing logs. A healthy control plane can still report a failed run. Reproduce the failing call chain and verify the failing hop before changing code.
+- In older self-hosted revisions with the Feishu topic-sync customization, PostgreSQL triggers queued notifications in `channel_notification_outbox` for the Lark issue-sync worker. A historical database patch suppressed task started and completed events while retaining failures, cancellations and results. Check the migration and installed function for the deployed revision before assuming that behavior is present. Put any intended changes in a reviewed migration so a redeploy can reproduce them.
